@@ -1159,6 +1159,9 @@ ngx_http_core_try_files_phase(ngx_http_request_t *r,
     ngx_http_core_loc_conf_t     *clcf;
     ngx_http_script_len_code_pt   lcode;
 
+    ngx_str_t                     r_uri;
+    ngx_flag_t                    r_allocated = 0;
+
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "try files phase: %ui", r->phase_handler);
 
@@ -1320,17 +1323,20 @@ ngx_http_core_try_files_phase(ngx_http_request_t *r,
         path.data += root;
 
         if (!alias) {
+            r_uri = r->uri;
             r->uri = path;
 
         } else if (alias == NGX_MAX_SIZE_T_VALUE) {
             if (!test_dir) {
+                r_uri = r->uri;
                 r->uri = path;
                 r->add_uri_to_alias = 1;
             }
 
         } else {
             name = r->uri.data;
-
+            r_allocated = 1;
+            r_uri = r->uri;
             r->uri.len = alias + path.len;
             r->uri.data = ngx_pnalloc(r->pool, r->uri.len);
             if (r->uri.data == NULL) {
@@ -1344,9 +1350,17 @@ ngx_http_core_try_files_phase(ngx_http_request_t *r,
 
         ngx_http_set_exten(r);
 
+        if (r_allocated) {
+          if (ngx_pfree(r->pool, r->uri.data) != NGX_OK)
+            ngx_log_error(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+              "can't free uri in try_files");
+            ngx_http_finalize_request(r, NGX_HTTP_INTERNAL_SERVER_ERROR);
+            return NGX_OK;
+        }
+        r->uri = r_uri;
+
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                        "try file uri: \"%V\"", &r->uri);
-
         r->phase_handler++;
         return NGX_AGAIN;
     }
